@@ -6,7 +6,7 @@ void Spectrometer::init(istream& data)
     data>>mag;
     mag.x_offset = 140e-3;
     mag.y_offset = -110e-3;
-    dt = 0.1/sqrt((cc/mag.x_delta)*(cc/mag.x_delta)+(cc/mag.y_delta)*(cc/mag.y_delta));
+    dt = 0.001/sqrt((cc/mag.x_delta)*(cc/mag.x_delta)+(cc/mag.y_delta)*(cc/mag.y_delta));
 }
 
 int Spectrometer::run(Particle& par)

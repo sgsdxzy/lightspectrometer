@@ -5,6 +5,7 @@
 #include <iostream>
 #include <vector>
 #include <array>
+#include <omp.h>
 
 #include "magnet.h"
 #include "spectrometer.h"
@@ -36,52 +37,54 @@ int main(int argc, char** argv)
     mag_data.close();
 
     Particle test;
-    int result;
     double time;
+    double En;
     vector<double> divergences;
     EDPSolver side, front;
     vector<int> results;
-    vector<double> x_pos, y_pos;
+    vector<double> x_pos, y_pos, Ens;
     
 
     ofstream oside("data_side.txt");
     ofstream ofront("data_front.txt");
 
-    for (double div=-10;div<=10;div+=0.5) {
+    for (double div=0;div<=0.5;div+=0.5) {
         divergences.push_back(div);
     }
     side.divergences = divergences;
     front.divergences = divergences;
 
-    x_pos.resize(divergences.size());
-    y_pos.resize(divergences.size());
-    results.resize(divergences.size());
+    for (double En=200;En<400;En+=0.1) {
+        Ens.push_back(En);
+    }
 
-    for (double En=30;En<400;En+=0.1) {
+    #pragma omp parallel for ordered schedule(dynamic) private(En, x_pos, y_pos, results, test, time)
+    for (auto it = Ens.begin(); it < Ens.end(); it++) {
+        En = *it;
         x_pos.clear();
         y_pos.clear();
         results.clear();
         for (double &div : divergences) {
             placeElectron(test, En, div);
-            result = spec.run(test);
-            results.push_back(result);
+            results.push_back(spec.run(test));
             x_pos.push_back(test.x);
             y_pos.push_back(test.y);
             if (div == 0) time = test.t;
         }
-        if (std::all_of(results.begin(), results.end(), [](int i){return i==1;})) {
-            //hit side
-            side.energies.push_back(En);
-            side.times.push_back(time);
-            side.positions.insert(side.positions.end(), x_pos.begin(), x_pos.end());
-            continue;
-        }
-        if (std::all_of(results.begin(), results.end(), [](int i){return i==2;})) {
-            //hit front
-            front.energies.push_back(En);
-            front.times.push_back(time);
-            front.positions.insert(front.positions.end(), y_pos.begin(), y_pos.end());
-            continue;
+        #pragma omp ordered
+        {
+            if (std::all_of(results.begin(), results.end(), [](int i){return i==1;})) {
+                //hit side
+                side.energies.push_back(En);
+                side.times.push_back(time);
+                side.positions.insert(side.positions.end(), x_pos.begin(), x_pos.end());
+            }
+            if (std::all_of(results.begin(), results.end(), [](int i){return i==2;})) {
+                //hit front
+                front.energies.push_back(En);
+                front.times.push_back(time);
+                front.positions.insert(front.positions.end(), y_pos.begin(), y_pos.end());
+            }
         }
     }
 

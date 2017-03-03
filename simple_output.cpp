@@ -33,8 +33,8 @@ int main(int argc, char** argv)
     Particle test;
     int result, div;
 
-    for (div=-4;div<=4;div++) {
-        placeElectron(test, 300, div);
+    for (div=-4;div<-4;div++) {
+        placeElectron(test, 140, div);
         result = spec.run(test);
         std::cout << 300 << sep << div << sep << test.x << sep << test.y << std::endl;
     }
