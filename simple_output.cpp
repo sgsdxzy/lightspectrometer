@@ -31,12 +31,19 @@ int main(int argc, char** argv)
     mag_data.close();
 
     Particle test;
-    int result;
+    int result, div;
 
-    for (double En=10;En<=500;En+=0.1) {
+    for (div=-4;div<=4;div++) {
+        placeElectron(test, 300, div);
+        result = spec.run(test);
+        std::cout << 300 << sep << div << sep << test.x << sep << test.y << std::endl;
+    }
+
+    div = 0;
+    for (double En=290;En<=310;En+=0.1) {
         placeElectron(test, En, 0);
         result = spec.run(test);
-        std::cout << En << ' ' << result << ' ' << test.x << ' ' << test.y << std::endl;
+        std::cout << En << sep << div << sep << test.x << sep << test.y << std::endl;
     }
 
   

@@ -47,7 +47,7 @@ int main(int argc, char** argv)
     ofstream oside("data_side.txt");
     ofstream ofront("data_front.txt");
 
-    for (double div=-40;div<=40;div+=1) {
+    for (double div=-10;div<=10;div+=0.5) {
         divergences.push_back(div);
     }
     side.divergences = divergences;
@@ -57,7 +57,7 @@ int main(int argc, char** argv)
     y_pos.resize(divergences.size());
     results.resize(divergences.size());
 
-    for (double En=10;En<500;En+=0.1) {
+    for (double En=30;En<400;En+=0.1) {
         x_pos.clear();
         y_pos.clear();
         results.clear();
