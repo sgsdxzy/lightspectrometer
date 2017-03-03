@@ -14,6 +14,8 @@ public:
     double vx, vy;      //m/s
     double m;           //kg
     double q;           //ee
+
+    double t = 0;           //flight time, s
 };
 
 class Spectrometer
@@ -22,9 +24,9 @@ private:
     double dt;          //s
 public:
     Magnet mag;
-    double maxtime = 1e-8;
+    double maxtime = 1;
 
-    void init();                                    //Calculate dt
+    void init(istream& data);                                    //Calculate dt
     int run(Particle& par);                         //Push the particle in magnetic field until condition is met, 4 = timeout
     virtual int condition(Particle& par);           //Whether a partile hits detector or is lost and stops running, 0 = keep running, 1 = hit side, 2 = hit front, 3 = hit other
 };
