@@ -1,21 +1,105 @@
 #include <cmath>
+#include <limits>
 #include "spectrometer.h"
 
-void Spectrometer::init(istream& data)
+void Particle::setElectron(double energy, double divergence)
 {
-    data>>mag;
-    mag.x_offset = 140e-3;
-    mag.y_offset = -110e-3;
-    dt = 0.0001/sqrt((cc/mag.x_delta)*(cc/mag.x_delta)+(cc/mag.y_delta)*(cc/mag.y_delta));
+    q = -1;
+    double gamma = energy*1e6*ee/(me*cc*cc);
+    double beta = sqrt(1-1/(gamma*gamma));
+    m = gamma * me;
+    vx = beta * cc * cos(divergence/1000);
+    vy = beta * cc * sin(divergence/1000);
+    x = 0;
+    y = 0;
 }
 
-int Spectrometer::run(Particle& par)
+Magnet::~Magnet()
+{
+    if (allocated) {
+        delete B;
+    }
+}
+
+
+double Magnet::accessB(int x, int y) const
+{
+    if ((x<0) || (x>=x_grid) || (y<0) || (y>=y_grid)) {
+        return 0;
+    }
+    return B[x_grid*y+x];
+}
+
+double Magnet::getB(double x, double y) const
+{
+    int x_left = floor(x/x_delta);
+    int y_left = floor(y/y_delta);
+    double pr = accessB(x_left, y_left);
+    double qr = accessB(x_left+1, y_left);
+    double ps = accessB(x_left, y_left+1);
+    double qs = accessB(x_left+1, y_left+1);
+    double p = x - x_left*x_delta;
+    double q = (x_left+1)*x_delta - x;
+    double r = y - y_left*y_delta;
+    double s = (y_left+1)*y_delta - y;
+
+    return (r*p*qs+r*q*ps+s*p*qr+s*q*pr)/(x_delta*y_delta);
+}
+
+ostream& operator<<(ostream& out, const Magnet& mag)
+{
+    const char sep = ' ';
+    out<<"#Light-magnet data file"<<endl;
+    out<<"#Version: 0.1"<<endl;
+    out<<mag.x_grid<<sep<<mag.y_grid<<endl;
+    out<<mag.x_delta<<sep<<mag.y_delta<<endl;
+    if (mag.allocated) {
+        for (int i=0;i<mag.y_grid;i++) {
+            for (int j=0;j<mag.x_grid;j++) {
+                out<<mag.B[mag.x_grid*i+j]<<sep;
+            }
+            out<<endl;
+        }
+    }
+    return out;
+}
+
+istream& operator>>(istream& in, Magnet& mag)
+{
+    //skip first 2 lines
+    in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+
+    in>>mag.x_grid>>mag.y_grid;
+    in>>mag.x_delta>>mag.y_delta;
+    if (mag.allocated) {
+        delete mag.B;
+    }
+    mag.B = new double[mag.x_grid*mag.y_grid];
+    mag.allocated = true;
+    for (int i=0;i<mag.y_grid;i++) {
+        for (int j=0;j<mag.x_grid;j++) {
+            in>>mag.B[mag.x_grid*i+j];
+        }
+    }
+    return in;
+}
+
+void Spectrometer::init(istream& data, double dt_multiplier=0.0001)
+{
+    data>>mag;
+    x_offset = 140e-3;
+    y_offset = -110e-3;
+    dt = dt_multiplier/sqrt((cc/mag.x_delta)*(cc/mag.x_delta)+(cc/mag.y_delta)*(cc/mag.y_delta));
+}
+
+int Spectrometer::run(Particle& par) const
 {
     double B, t, s, vpx, vpy;
     int result = 0;
 
     while (par.t <= maxtime) {
-        B = mag.getB(par.x, par.y);
+        B = mag.getB(par.x-x_offset, par.y-y_offset);
         t = (par.q*ee*B/par.m)*dt/2;
         s = 2*t/(1+t*t);
         vpx = par.vx+t*par.vy;
@@ -34,7 +118,7 @@ int Spectrometer::run(Particle& par)
     return 4;
 }
 
-int Spectrometer::condition(Particle& par)
+int Spectrometer::condition(Particle& par) const
 {
     if ((par.x < -10e-3) || (par.y < -110e-3)) {
         return 3;
@@ -46,4 +130,81 @@ int Spectrometer::condition(Particle& par)
         return 2;
     }
     return 0;
+}
+
+void EDPSolver::init()
+{
+    div_size = divergences.size();
+    en_size = energies.size();
+    pos_size = positions.size();
+    div_min = divergences.front();
+    div_max = divergences.back();
+    div_0_index = distance(divergences.begin(), lower_bound(divergences.begin(), divergences.end(), 0));
+    en_min = energies.front();
+    en_max = energies.back();
+    pos_min = position(0, div_0_index);
+    pos_max = position(en_size-1, div_0_index);
+}
+
+
+double EDPSolver::position(int en_index, int div_index) const
+{
+    int index = div_size * en_index + div_index;
+    //if ((index<0) || (index>=pos_size)) return 0;
+    return positions[index];
+}
+
+double EDPSolver::getP(double E, double D) const
+{
+    int en_left = distance(energies.begin(), lower_bound(energies.begin(), energies.end(), E));
+    int en_right = en_left + 1;
+    int div_left = distance(divergences.begin(), lower_bound(divergences.begin(), divergences.end(), D));
+    int div_right = div_left + 1;
+    double pr = position(en_left, div_left);
+    double qr = position(en_right, div_left);
+    double ps = position(en_left, div_right);
+    double qs = position(en_right, div_right);
+    double p = E - energies[en_left];
+    double q = energies[en_right] - E;
+    double r = D - divergences[div_left];
+    double s = divergences[div_right] - D;
+    double dx = p+q;
+    double dy = r+s;
+    
+    return (r*p*qs+r*q*ps+s*p*qr+s*q*pr)/(dx*dy);
+}
+
+double EDPSolver::getE(double P, double D) const
+{
+    int div_left = distance(divergences.begin(), lower_bound(divergences.begin(), divergences.end(), D));
+    int div_right = div_left + 1;
+    double r = D - divergences[div_left];
+    double s = divergences[div_right] - D;
+    double dy = r+s;
+
+    vector<double> P_int(en_size);
+    for (int i=0;i<en_size;i++) {
+        P_int[i] = (position(i, div_left)*s + position(i, div_right)*r)/dy;
+    }
+    
+    int pos_left = distance(P_int.begin(), lower_bound(P_int.begin(), P_int.end(), P));
+    int pos_right = pos_left + 1;
+    double p = P - P_int[pos_left];
+    double q = P_int[pos_right] - P;
+    double dx = p+q;
+
+    return (energies[pos_left]*q+energies[pos_right]*p)/dx;
+}
+
+double EDPSolver::getT(double E) const
+{
+    int en_left = distance(energies.begin(), lower_bound(energies.begin(), energies.end(), E));
+    int en_right = en_left + 1;
+    double pp = times[en_left];
+    double qq = times[en_right];
+    double p = E - energies[en_left];
+    double q = energies[en_right] - E;
+    double dx = p+q;
+
+    return (p*qq+q*pp)/dx;
 }
