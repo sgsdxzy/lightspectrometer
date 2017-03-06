@@ -36,13 +36,13 @@ private:
     double accessB(int x, int y) const;   //return B[y][x]
 
 public:
-    vector<double> B;                      //The magnetic filed block, unit in T
+    double* B;                      //The magnetic filed block, unit in T
     int x_grid, y_grid;             //The number of grids in x and y direction
     double x_delta, y_delta;        //The step of grids in x and y direction, units in SI(m)
 
     double getB(double x, double y) const;  //Get the magnetic field at physical space (x,y)
-    friend ostream& operator<<(ostream& out, const Magnet& mag);
-    friend istream& operator>>(istream& in, Magnet& mag);
+    //friend ostream& operator<<(ostream& out, const Magnet& mag);
+    //friend istream& operator>>(istream& in, Magnet& mag);
 };
 
 class EDPSolver;
@@ -59,20 +59,17 @@ public:
     void initdt(double dt_multiplier);                                    //Calculate dt
     int run(Particle& par) const;                         //Push the particle in magnetic field until condition is met, 4 = timeout
     virtual int condition(Particle& par) const;           //Whether a partile hits detector or is lost and stops running, 0 = keep running, 1 = hit side, 2 = hit front, 3 = hit other
-    void getSolverData(vector<double> &Ens, vector<double> &divergences, EDPSolver& side, EDPSolver& front) const;
+    void getSolverData(double *Ens, int en_size, double *divergences, int div_size, double *x_pos, double *y_pos, int* results, double* times) const;
 };
 
 class EDPSolver
 {
 public :
-    vector<double> divergences, energies, times, positions; //data
+    double *energies, *divergences, *times, *positions; //data
+    int div_size, en_size, div_0_index;
 
-    double div_min, div_max, en_min, en_max, pos_min, pos_max; // all ranges are [min, max)
+    //double div_min, div_max, en_min, en_max, pos_min, pos_max; // all ranges are [min, max)
     double ddiv, den;   //deltas
-    int div_size, en_size, pos_size, div_0_index;
-
-    void init();
-    void clear();
 
     double position(int en_index, int div_index) const;
     

@@ -39,6 +39,7 @@ double Magnet::getB(double x, double y) const
     return (r*p*qs+r*q*ps+s*p*qr+s*q*pr)/(x_delta*y_delta);
 }
 
+/*
 ostream& operator<<(ostream& out, const Magnet& mag)
 {
     const char sep = ' ';
@@ -71,12 +72,10 @@ istream& operator>>(istream& in, Magnet& mag)
         }
     }
     return in;
-}
+}*/
 
 void Spectrometer::initdt(double dt_multiplier)
 {
-    //x_offset = 140e-3;
-    //y_offset = -110e-3;
     dt = dt_multiplier/sqrt((cc/mag.x_delta)*(cc/mag.x_delta)+(cc/mag.y_delta)*(cc/mag.y_delta));
 }
 
@@ -119,72 +118,27 @@ int Spectrometer::condition(Particle& par) const
     return 0;
 }
 
-void Spectrometer::getSolverData(vector<double> &Ens, vector<double> &divergences, EDPSolver& side, EDPSolver& front) const
+void Spectrometer::getSolverData(double *Ens, int en_size, double *divergences, int div_size, double *x_pos, double *y_pos, int *results, double *times) const
 {
     Particle test;
-    double time;
-    double En;
-    vector<int> results;
-    vector<double> x_pos, y_pos;
+    double En, div;
+    int i, j;
     
-    side.clear();
-    front.clear();
-    side.divergences = divergences;
-    front.divergences = divergences;
-
-    #pragma omp parallel for ordered schedule(dynamic) private(En, x_pos, y_pos, results, test, time)
-    for (auto it = Ens.begin(); it < Ens.end(); it++) {
-        En = *it;
-        x_pos.clear();
-        y_pos.clear();
-        results.clear();
-        for (double &div : divergences) {
+    #pragma omp parallel for num_threads(4) schedule(dynamic) private(En, div, test, i ,j)
+    for (i = 0; i < en_size; i++) {
+        En = Ens[i];
+        for (j = 0; j < div_size; j++) {
+            div = divergences[i];
             test.setElectron(En, div);
-            results.push_back(run(test));
-            x_pos.push_back(test.x);
-            y_pos.push_back(test.y);
-            if (div == 0) time = test.t;
-        }
-        #pragma omp ordered
-        {
-            if (std::all_of(results.begin(), results.end(), [](int i){return i==1;})) {
-                //hit side
-                side.energies.push_back(En);
-                side.times.push_back(time);
-                side.positions.insert(side.positions.end(), x_pos.begin(), x_pos.end());
-            }
-            if (std::all_of(results.begin(), results.end(), [](int i){return i==2;})) {
-                //hit front
-                front.energies.push_back(En);
-                front.times.push_back(time);
-                front.positions.insert(front.positions.end(), y_pos.begin(), y_pos.end());
-            }
+            results[i*div_size+j] = run(test);
+            x_pos[i*div_size+j] = test.x;
+            y_pos[i*div_size+j] = test.y;
+            if (div == 0) times[i] = test.t;
         }
     }
 
 }
 
-void EDPSolver::init()
-{
-    div_size = divergences.size();
-    en_size = energies.size();
-    pos_size = positions.size();
-    div_min = divergences.front();
-    div_max = divergences.back();
-    div_0_index = distance(divergences.begin(), lower_bound(divergences.begin(), divergences.end(), 0));
-    en_min = energies.front();
-    en_max = energies.back();
-    pos_min = position(0, div_0_index);
-    pos_max = position(en_size-1, div_0_index);
-}
-
-void EDPSolver::clear()
-{
-    divergences.clear();
-    energies.clear();
-    times.clear();
-    positions.clear();
-}
 
 double EDPSolver::position(int en_index, int div_index) const
 {
@@ -195,9 +149,9 @@ double EDPSolver::position(int en_index, int div_index) const
 
 double EDPSolver::getP(double E, double D) const
 {
-    int en_left = distance(energies.begin(), lower_bound(energies.begin(), energies.end(), E));
+    int en_left = distance(energies, lower_bound(energies, energies+en_size, E));
     int en_right = en_left + 1;
-    int div_left = distance(divergences.begin(), lower_bound(divergences.begin(), divergences.end(), D));
+    int div_left = distance(divergences, lower_bound(divergences, divergences+en_size, D));
     int div_right = div_left + 1;
     double pr = position(en_left, div_left);
     double qr = position(en_right, div_left);
@@ -215,7 +169,7 @@ double EDPSolver::getP(double E, double D) const
 
 double EDPSolver::getE(double P, double D) const
 {
-    int div_left = distance(divergences.begin(), lower_bound(divergences.begin(), divergences.end(), D));
+    int div_left = distance(divergences, lower_bound(divergences, divergences+en_size, D));
     int div_right = div_left + 1;
     double r = D - divergences[div_left];
     double s = divergences[div_right] - D;
@@ -237,7 +191,7 @@ double EDPSolver::getE(double P, double D) const
 
 double EDPSolver::getT(double E) const
 {
-    int en_left = distance(energies.begin(), lower_bound(energies.begin(), energies.end(), E));
+    int en_left = distance(energies, lower_bound(energies, energies+en_size, E));
     int en_right = en_left + 1;
     double pp = times[en_left];
     double qq = times[en_right];
