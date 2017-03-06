@@ -57,8 +57,8 @@ cdef class pyEDPSolver:
         self.solver.div_size = self.divergences.shape[0]
         self.solver.en_size = self.energies.shape[0]
         self.solver.div_0_index = np.searchsorted(self.divergences, 0)
-        self.solver.ddiv = self.divergences[1] - self.divergences[0] 
-        self.solver.den = self.energies[1] - self.energies[0]
+        #self.solver.ddiv = self.divergences[1] - self.divergences[0] 
+        #self.solver.den = self.energies[1] - self.energies[0]
 
     def save(self, f):
         np.savez(f, energies = self.energies, divergences = self.divergences, times = self.times, positions = self.positions)
@@ -122,5 +122,5 @@ cdef class pySpectrometer:
         side_en = (results == 1).all(axis=1)
         front_en = (results == 2).all(axis=1)
         #side.init(energies[side_en], divergences, times[side_en], x_pos[side_en])
-        front.init(energies[front_en], divergences, times[front_en], x_pos[front_en])
+        front.init(energies[front_en], divergences, times[front_en], y_pos[front_en])
         return front
