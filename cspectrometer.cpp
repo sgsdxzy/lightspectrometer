@@ -1,6 +1,6 @@
 #include <cmath>
 #include <limits>
-#include "spectrometer.h"
+#include "cspectrometer.h"
 
 void Particle::setElectron(double energy, double divergence)
 {
@@ -12,13 +12,6 @@ void Particle::setElectron(double energy, double divergence)
     vy = beta * cc * sin(divergence/1000);
     x = 0;
     y = 0;
-}
-
-Magnet::~Magnet()
-{
-    if (allocated) {
-        delete B;
-    }
 }
 
 
@@ -53,13 +46,11 @@ ostream& operator<<(ostream& out, const Magnet& mag)
     out<<"#Version: 0.1"<<endl;
     out<<mag.x_grid<<sep<<mag.y_grid<<endl;
     out<<mag.x_delta<<sep<<mag.y_delta<<endl;
-    if (mag.allocated) {
-        for (int i=0;i<mag.y_grid;i++) {
-            for (int j=0;j<mag.x_grid;j++) {
-                out<<mag.B[mag.x_grid*i+j]<<sep;
-            }
-            out<<endl;
+    for (int i=0;i<mag.y_grid;i++) {
+        for (int j=0;j<mag.x_grid;j++) {
+            out<<mag.B[mag.x_grid*i+j]<<sep;
         }
+        out<<endl;
     }
     return out;
 }
@@ -72,11 +63,8 @@ istream& operator>>(istream& in, Magnet& mag)
 
     in>>mag.x_grid>>mag.y_grid;
     in>>mag.x_delta>>mag.y_delta;
-    if (mag.allocated) {
-        delete mag.B;
-    }
-    mag.B = new double[mag.x_grid*mag.y_grid];
-    mag.allocated = true;
+    mag.B.clear();
+    mag.B.resize(mag.x_grid*mag.y_grid);
     for (int i=0;i<mag.y_grid;i++) {
         for (int j=0;j<mag.x_grid;j++) {
             in>>mag.B[mag.x_grid*i+j];
@@ -85,11 +73,10 @@ istream& operator>>(istream& in, Magnet& mag)
     return in;
 }
 
-void Spectrometer::init(istream& data, double dt_multiplier=0.0001)
+void Spectrometer::initdt(double dt_multiplier)
 {
-    data>>mag;
-    x_offset = 140e-3;
-    y_offset = -110e-3;
+    //x_offset = 140e-3;
+    //y_offset = -110e-3;
     dt = dt_multiplier/sqrt((cc/mag.x_delta)*(cc/mag.x_delta)+(cc/mag.y_delta)*(cc/mag.y_delta));
 }
 
@@ -132,6 +119,51 @@ int Spectrometer::condition(Particle& par) const
     return 0;
 }
 
+void Spectrometer::getSolverData(vector<double> &Ens, vector<double> &divergences, EDPSolver& side, EDPSolver& front) const
+{
+    Particle test;
+    double time;
+    double En;
+    vector<int> results;
+    vector<double> x_pos, y_pos;
+    
+    side.clear();
+    front.clear();
+    side.divergences = divergences;
+    front.divergences = divergences;
+
+    #pragma omp parallel for ordered schedule(dynamic) private(En, x_pos, y_pos, results, test, time)
+    for (auto it = Ens.begin(); it < Ens.end(); it++) {
+        En = *it;
+        x_pos.clear();
+        y_pos.clear();
+        results.clear();
+        for (double &div : divergences) {
+            test.setElectron(En, div);
+            results.push_back(run(test));
+            x_pos.push_back(test.x);
+            y_pos.push_back(test.y);
+            if (div == 0) time = test.t;
+        }
+        #pragma omp ordered
+        {
+            if (std::all_of(results.begin(), results.end(), [](int i){return i==1;})) {
+                //hit side
+                side.energies.push_back(En);
+                side.times.push_back(time);
+                side.positions.insert(side.positions.end(), x_pos.begin(), x_pos.end());
+            }
+            if (std::all_of(results.begin(), results.end(), [](int i){return i==2;})) {
+                //hit front
+                front.energies.push_back(En);
+                front.times.push_back(time);
+                front.positions.insert(front.positions.end(), y_pos.begin(), y_pos.end());
+            }
+        }
+    }
+
+}
+
 void EDPSolver::init()
 {
     div_size = divergences.size();
@@ -146,6 +178,13 @@ void EDPSolver::init()
     pos_max = position(en_size-1, div_0_index);
 }
 
+void EDPSolver::clear()
+{
+    divergences.clear();
+    energies.clear();
+    times.clear();
+    positions.clear();
+}
 
 double EDPSolver::position(int en_index, int div_index) const
 {
