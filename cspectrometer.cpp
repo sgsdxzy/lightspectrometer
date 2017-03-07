@@ -125,7 +125,7 @@ void Spectrometer::getSolverData(double *Ens, int en_size, double *divergences, 
     double En, div;
     int i, j;
     
-    #pragma omp parallel for private(En, div, test, i ,j)
+    #pragma omp parallel for schedule(dynamic) private(En, div, test, i ,j)
     for (i = 0; i < en_size; i++) {
         En = Ens[i];
         for (j = 0; j < div_size; j++) {
