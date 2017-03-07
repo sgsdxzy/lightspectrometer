@@ -121,16 +121,19 @@ int Spectrometer::condition(Particle& par) const
 void Spectrometer::getSolverData(double *Ens, int en_size, double *divergences, int div_size, double *x_pos, double *y_pos, int *results, double *times) const
 {
     Particle test;
+    int result;
     double En, div;
     int i, j;
     
-    //#pragma omp parallel for private(En, div, test, i ,j)
+    #pragma omp parallel for private(En, div, test, i ,j)
     for (i = 0; i < en_size; i++) {
         En = Ens[i];
         for (j = 0; j < div_size; j++) {
-            div = divergences[i];
+            div = divergences[j];
             test.setElectron(En, div);
-            results[i*div_size+j] = run(test);
+            result = run(test);
+            results[i*div_size+j] = result;
+            //cout << En << ' ' << div << ' ' << result << endl;
             x_pos[i*div_size+j] = test.x;
             y_pos[i*div_size+j] = test.y;
             if (div == 0) times[i] = test.t;

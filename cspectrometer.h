@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <omp.h>
 
+using std::cout;
 using std::endl;
 using std::ostream;
 using std::istream;
@@ -69,7 +70,7 @@ public :
     int div_size, en_size, div_0_index;
 
     //double div_min, div_max, en_min, en_max, pos_min, pos_max; // all ranges are [min, max)
-    double ddiv, den;   //deltas
+    //double ddiv, den;   //deltas
 
     double position(int en_index, int div_index) const;
     

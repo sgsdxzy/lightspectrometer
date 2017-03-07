@@ -33,7 +33,7 @@ cdef extern from "cspectrometer.h":
         double *positions;
         int div_size, en_size, div_0_index;
 
-        double ddiv, den;
+        #double ddiv, den;
 
         double getP(double E, double D) const;
         double getE(double P, double D) const;
@@ -87,7 +87,7 @@ cdef class pySpectrometer:
     cdef np.ndarray B
     cdef double dt_multiplier
 
-    def init(self, np.ndarray[double, ndim=2, mode="c"] B not None, x_delta=0.002, y_delta=0.0025, x_offset=140e-3, y_offset=-110e-3, dt_multiplier=0.0001, maxtime=1):
+    def init(self, np.ndarray[double, ndim=2, mode="c"] B not None, x_delta=0.002, y_delta=0.0025, x_offset=140e-3, y_offset=-110e-3, dt_multiplier=0.0001, maxtime=1e-4):
         self.B = B
         self.dt_multiplier = dt_multiplier
         self.spec.mag.B = &B[0, 0]
@@ -111,16 +111,16 @@ cdef class pySpectrometer:
         datas.close()
 
     def getSolvers(self, np.ndarray[double, ndim=1, mode="c"] energies not None, np.ndarray[double, ndim=1, mode="c"] divergences not None):
-        cdef np.ndarray[double, ndim=2, mode="c"] x_pos = np.ndarray(shape=(energies.shape[0], divergences.shape[0]), dtype=float, order="c")
-        cdef np.ndarray[double, ndim=2, mode="c"] y_pos = np.ndarray(shape=(energies.shape[0], divergences.shape[0]), dtype=float, order="c")
-        cdef np.ndarray[int, ndim=2, mode="c"] results =  np.ndarray(shape=(energies.shape[0], divergences.shape[0]), dtype=np.int32, order="c")
-        cdef np.ndarray[double, ndim=1, mode="c"] times = np.ndarray(shape=(energies.shape[0], ), dtype=float, order="c")
+        cdef np.ndarray[double, ndim=2, mode="c"] x_pos = np.array(shape=(energies.shape[0], divergences.shape[0]), dtype=float, order="c")
+        cdef np.ndarray[double, ndim=2, mode="c"] y_pos = np.array(shape=(energies.shape[0], divergences.shape[0]), dtype=float, order="c")
+        cdef np.ndarray[int, ndim=2, mode="c"] results =  np.array(shape=(energies.shape[0], divergences.shape[0]), dtype=np.int32, order="c")
+        cdef np.ndarray[double, ndim=1, mode="c"] times = np.array(shape=(energies.shape[0], ), dtype=float, order="c")
         self.spec.getSolverData(&energies[0], energies.shape[0], &divergences[0], divergences.shape[0], &x_pos[0, 0], &y_pos[0, 0], &results[0, 0], &times[0])
 
         side = pyEDPSolver()
         front = pyEDPSolver()
         side_en = (results == 1).all(axis=1)
         front_en = (results == 2).all(axis=1)
-        #side.init(energies[side_en], divergences, times[side_en], x_pos[side_en])
+        side.init(energies[side_en], divergences, times[side_en], x_pos[side_en])
         front.init(energies[front_en], divergences, times[front_en], y_pos[front_en])
-        return front
+        return side, front
