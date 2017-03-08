@@ -6,10 +6,6 @@
 #include <algorithm>
 #include <omp.h>
 
-using std::cout;
-using std::endl;
-using std::ostream;
-using std::istream;
 using std::vector;
 using std::distance;
 using std::lower_bound;

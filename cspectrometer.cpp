@@ -133,7 +133,6 @@ void Spectrometer::getSolverData(double *Ens, int en_size, double *divergences, 
             test.setElectron(En, div);
             result = run(test);
             results[i*div_size+j] = result;
-            //cout << En << ' ' << div << ' ' << result << endl;
             x_pos[i*div_size+j] = test.x;
             y_pos[i*div_size+j] = test.y;
             if (div == 0) times[i] = test.t;
