@@ -56,14 +56,15 @@ public:
     void initdt(double dt_multiplier);                                    //Calculate dt
     int run(Particle& par) const;                         //Push the particle in magnetic field until condition is met, 4 = timeout
     virtual int condition(Particle& par) const;           //Whether a partile hits detector or is lost and stops running, 0 = keep running, 1 = hit side, 2 = hit front, 3 = hit other
-    void getSolverData(double *Ens, int en_size, double *divergences, int div_size, double *x_pos, double *y_pos, int* results, double* times) const;
+    void getSolverData(double *Ens, int en_size, double *divergences, 
+            int div_size, double *x_pos, double *y_pos, int* results, double* times, int central_index) const;
 };
 
 class EDPSolver
 {
 public :
     double *energies, *divergences, *times, *positions; //data
-    int div_size, en_size, div_0_index;
+    int div_size, en_size, central_index;
 
     //double div_min, div_max, en_min, en_max, pos_min, pos_max; // all ranges are [min, max)
     //double ddiv, den;   //deltas

@@ -24,14 +24,14 @@ cdef extern from "cspectrometer.h":
         void initdt(double dt_multiplier);
         #int run(Particle& par) const;
         #int condition(Particle& par) const;
-        void getSolverData(double *Ens, int en_size, double *divergences, int div_size, double *x_pos, double *y_pos, int* results, double* times) const;
+        void getSolverData(double *Ens, int en_size, double *divergences, int div_size, double *x_pos, double *y_pos, int* results, double* times, int central_index) const;
 
     cdef cppclass EDPSolver:
         double *energies;
         double *divergences;
         double *times;
         double *positions;
-        int div_size, en_size, div_0_index;
+        int div_size, en_size, central_index;
 
         double getP(double E, double D) const;
         double getE(double P, double D) const;
@@ -39,7 +39,7 @@ cdef extern from "cspectrometer.h":
 
 cdef class pyEDPSolver:
     cdef EDPSolver solver
-    cdef np.ndarray energies, divergences, times, positions
+    cdef public np.ndarray energies, divergences, times, positions
 
     @classmethod
     def fromdata(cls, np.ndarray[double, ndim=1, mode="c"] energies not None, np.ndarray[double, ndim=1, mode="c"] divergences not None,
@@ -59,8 +59,6 @@ cdef class pyEDPSolver:
         #check if input is valid
         if not ((energies.shape[0] == times.shape[0]) and (energies.shape[0] == positions.shape[0]) and (divergences.shape[0] == positions.shape[1])) :
             raise ValueError("Unmatched input size")
-        if not np.in1d(0, divergences) :
-            raise ValueError("0 must be in divergences")
         #TODO: check if sorted
 
         self.energies = energies
@@ -74,7 +72,7 @@ cdef class pyEDPSolver:
         self.solver.positions = &positions[0, 0]
         self.solver.div_size = self.divergences.shape[0]
         self.solver.en_size = self.energies.shape[0]
-        self.solver.div_0_index = np.searchsorted(self.divergences, 0)
+        self.solver.central_index = np.argmin(np.abs(divergences))
 
     def save(self, f):
         np.savez(f, energies = self.energies, divergences = self.divergences, times = self.times, positions = self.positions)
@@ -100,11 +98,11 @@ cdef class pyEDPSolver:
 
 cdef class pySpectrometer:
     cdef Spectrometer spec
-    cdef np.ndarray B
+    cdef public np.ndarray B
     cdef double dt_multiplier
 
     @classmethod
-    def fromdata(cls, np.ndarray[double, ndim=2, mode="c"] B not None, x_delta, y_delta, x_offset=0, y_offset=0, dt_multiplier=0.0001, maxtime=1e-4):
+    def fromdata(cls, np.ndarray[double, ndim=2, mode="c"] B not None, x_delta, y_delta, x_offset=0, y_offset=0, dt_multiplier=0.0001, maxtime=1e-6):
         newspec = cls()
         newspec.init(B, x_delta, y_delta, x_offset, y_offset, dt_multiplier, maxtime)
         return newspec
@@ -132,6 +130,9 @@ cdef class pySpectrometer:
         self.dt_multiplier = dt_multiplier
         self.spec.initdt(self.dt_multiplier)
 
+    def setmaxtime(self, maxtime):
+        self.spec.maxtime = maxtime
+
     def save(self, f):
         np.savez(f, B = self.B, paras = (self.spec.mag.x_delta, self.spec.mag.y_delta, self.spec.x_offset, self.spec.y_offset, self.dt_multiplier, self.spec.maxtime))
 
@@ -147,7 +148,8 @@ cdef class pySpectrometer:
         cdef np.ndarray[double, ndim=2, mode="c"] y_pos = np.ndarray(shape=(energies.shape[0], divergences.shape[0]), dtype=float, order="c")
         cdef np.ndarray[int, ndim=2, mode="c"] results =  np.ndarray(shape=(energies.shape[0], divergences.shape[0]), dtype=np.int32, order="c")
         cdef np.ndarray[double, ndim=1, mode="c"] times = np.ndarray(shape=(energies.shape[0], ), dtype=float, order="c")
-        self.spec.getSolverData(&energies[0], energies.shape[0], &divergences[0], divergences.shape[0], &x_pos[0, 0], &y_pos[0, 0], &results[0, 0], &times[0])
+        cdef int central_index = np.argmin(np.abs(divergences))
+        self.spec.getSolverData(&energies[0], energies.shape[0], &divergences[0], divergences.shape[0], &x_pos[0, 0], &y_pos[0, 0], &results[0, 0], &times[0], central_index)
 
         side = None
         front = None

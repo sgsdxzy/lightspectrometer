@@ -12,6 +12,7 @@ void Particle::setElectron(double energy, double divergence)
     vy = beta * cc * sin(divergence/1000);
     x = 0;
     y = 0;
+    t = 0;
 }
 
 
@@ -118,7 +119,7 @@ int Spectrometer::condition(Particle& par) const
     return 0;
 }
 
-void Spectrometer::getSolverData(double *Ens, int en_size, double *divergences, int div_size, double *x_pos, double *y_pos, int *results, double *times) const
+void Spectrometer::getSolverData(double *Ens, int en_size, double *divergences, int div_size, double *x_pos, double *y_pos, int *results, double *times, int central_index) const
 {
     Particle test;
     int result;
@@ -135,7 +136,7 @@ void Spectrometer::getSolverData(double *Ens, int en_size, double *divergences, 
             results[i*div_size+j] = result;
             x_pos[i*div_size+j] = test.x;
             y_pos[i*div_size+j] = test.y;
-            if (div == 0) times[i] = test.t;
+            if (j == central_index) times[i] = test.t;
         }
     }
 
