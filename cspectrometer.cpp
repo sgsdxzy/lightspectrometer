@@ -125,7 +125,7 @@ void Spectrometer::getSolverData(double *Ens, int en_size, double *divergences, 
     int result;
     double En, div;
     int i, j;
-    
+
     #pragma omp parallel for schedule(dynamic) private(En, div, test, i ,j)
     for (i = 0; i < en_size; i++) {
         En = Ens[i];
@@ -154,7 +154,7 @@ double EDPSolver::getP(double E, double D) const
 {
     int en_left = distance(energies, lower_bound(energies, energies+en_size, E));
     int en_right = en_left + 1;
-    int div_left = distance(divergences, lower_bound(divergences, divergences+en_size, D));
+    int div_left = distance(divergences, lower_bound(divergences, divergences+div_size, D));
     int div_right = div_left + 1;
     double pr = position(en_left, div_left);
     double qr = position(en_right, div_left);
@@ -166,13 +166,13 @@ double EDPSolver::getP(double E, double D) const
     double s = divergences[div_right] - D;
     double dx = p+q;
     double dy = r+s;
-    
+
     return (r*p*qs+r*q*ps+s*p*qr+s*q*pr)/(dx*dy);
 }
 
 double EDPSolver::getE(double P, double D) const
 {
-    int div_left = distance(divergences, lower_bound(divergences, divergences+en_size, D));
+    int div_left = distance(divergences, lower_bound(divergences, divergences+div_size, D));
     int div_right = div_left + 1;
     double r = D - divergences[div_left];
     double s = divergences[div_right] - D;
@@ -182,7 +182,7 @@ double EDPSolver::getE(double P, double D) const
     for (int i=0;i<en_size;i++) {
         P_int[i] = (position(i, div_left)*s + position(i, div_right)*r)/dy;
     }
-    
+
     int pos_left = distance(P_int.begin(), lower_bound(P_int.begin(), P_int.end(), P));
     int pos_right = pos_left + 1;
     double p = P - P_int[pos_left];
