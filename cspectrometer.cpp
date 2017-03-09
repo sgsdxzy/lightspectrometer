@@ -183,8 +183,9 @@ double EDPSolver::getE(double P, double D) const
         P_int[i] = (position(i, div_left)*s + position(i, div_right)*r)/dy;
     }
 
-    int pos_right = distance(P_int.begin(), lower_bound(P_int.begin(), P_int.end(), P));
+    int pos_right = distance(lower_bound(P_int.rbegin(), P_int.rend(), P), P_int.rend());
     int pos_left = pos_right - 1;
+        std::cout << P << ' ' << pos_right << ' ' << *lower_bound(P_int.begin(), P_int.end(), P) << std::endl;
     double p = P - P_int[pos_left];
     double q = P_int[pos_right] - P;
     double dx = p+q;
