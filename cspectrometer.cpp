@@ -152,10 +152,10 @@ double EDPSolver::position(int en_index, int div_index) const
 
 double EDPSolver::getP(double E, double D) const
 {
-    int en_left = distance(energies, lower_bound(energies, energies+en_size, E));
-    int en_right = en_left + 1;
-    int div_left = distance(divergences, lower_bound(divergences, divergences+div_size, D));
-    int div_right = div_left + 1;
+    int en_right = distance(energies, lower_bound(energies, energies+en_size, E));
+    int en_left = en_right - 1;
+    int div_right = distance(divergences, lower_bound(divergences, divergences+div_size, D));
+    int div_left = div_right - 1;
     double pr = position(en_left, div_left);
     double qr = position(en_right, div_left);
     double ps = position(en_left, div_right);
@@ -172,8 +172,8 @@ double EDPSolver::getP(double E, double D) const
 
 double EDPSolver::getE(double P, double D) const
 {
-    int div_left = distance(divergences, lower_bound(divergences, divergences+div_size, D));
-    int div_right = div_left + 1;
+    int div_right = distance(divergences, lower_bound(divergences, divergences+div_size, D));
+    int div_left = div_right - 1;
     double r = D - divergences[div_left];
     double s = divergences[div_right] - D;
     double dy = r+s;
@@ -183,8 +183,8 @@ double EDPSolver::getE(double P, double D) const
         P_int[i] = (position(i, div_left)*s + position(i, div_right)*r)/dy;
     }
 
-    int pos_left = distance(P_int.begin(), lower_bound(P_int.begin(), P_int.end(), P));
-    int pos_right = pos_left + 1;
+    int pos_right = distance(P_int.begin(), lower_bound(P_int.begin(), P_int.end(), P));
+    int pos_left = pos_right - 1;
     double p = P - P_int[pos_left];
     double q = P_int[pos_right] - P;
     double dx = p+q;
@@ -194,8 +194,8 @@ double EDPSolver::getE(double P, double D) const
 
 double EDPSolver::getT(double E) const
 {
-    int en_left = distance(energies, lower_bound(energies, energies+en_size, E));
-    int en_right = en_left + 1;
+    int en_right = distance(energies, lower_bound(energies, energies+en_size, E));
+    int en_left = en_right - 1;
     double pp = times[en_left];
     double qq = times[en_right];
     double p = E - energies[en_left];
