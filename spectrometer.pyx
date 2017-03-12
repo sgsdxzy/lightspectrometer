@@ -7,6 +7,7 @@
 
 import cython
 from cython.parallel import parallel, prange
+cimport openmp
 import numpy as np
 cimport numpy as np
 cimport libc.math as cmath
@@ -143,11 +144,12 @@ cdef class pySpectrometer:
 
     cdef getSolverData(self, double[:] energies, double[:] divergences):
         cdef:
-            Particle test;
             double En, div;
             int i, j, en_size, div_size;
             np.ndarray[double, ndim=2] x_pos, y_pos, times
             np.ndarray[int, ndim=2] results
+            int num_threads = openmp.omp_get_num_threads()
+            Particle test, blank
         en_size = energies.shape[0]
         div_size = divergences.shape[0]
         x_pos = np.ndarray(shape=(en_size, div_size), dtype=float)
@@ -157,6 +159,8 @@ cdef class pySpectrometer:
 
         for i in prange(en_size, nogil=True, schedule='dynamic'):
             En = energies[i]
+            j = 0
+            test = blank
             for j in range(div_size):
                 div = divergences[j]
                 setElectron(&test, En, div)
