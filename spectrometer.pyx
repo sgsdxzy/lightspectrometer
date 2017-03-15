@@ -7,6 +7,7 @@
 
 import cython
 from cython.parallel import parallel, prange
+from libc.stdlib cimport malloc, free
 cimport openmp
 import numpy as np
 cimport numpy as np
@@ -14,27 +15,27 @@ cimport libc.math as cmath
 from libc.stdio cimport printf
 
 cdef:
-    double cc = 299792458;    #speed of light in vaccum
-    double ee = 1.602e-19;    #charge of electron
-    double me = 9.109e-31;    #mass of electron
+    double cc = 299792458    #speed of light in vaccum
+    double ee = 1.602e-19    #charge of electron
+    double me = 9.109e-31    #mass of electron
 
 cdef struct Particle:
-    double x, y;        #m
-    double vx, vy;      #m/s
-    double m;           #kg
-    double q;           #ee
-    double t;       #flight time, s
+    double x, y        #m
+    double vx, vy      #m/s
+    double m           #kg
+    double q           #ee
+    double t           #flight time, s
 
-cdef void setElectron(Particle *par, double energy, double divergence) nogil:     #Energy in MeV, divergence in mrad
-    cdef double gamma = energy*1e6*ee/(me*cc*cc);
-    cdef double beta = cmath.sqrt(1-1/(gamma*gamma));
-    par.q = -1;
-    par.m = gamma * me;
-    par.vx = beta * cc * cmath.cos(divergence/1000);
-    par.vy = beta * cc * cmath.sin(divergence/1000);
-    par.x = 0;
-    par.y = 0;
-    par.t = 0;
+cdef Particle setElectron(Particle *par, double energy, double divergence) nogil:     #Energy in MeV, divergence in mrad
+    cdef double gamma = energy*1e6*ee/(me*cc*cc)
+    cdef double beta = cmath.sqrt(1-1/(gamma*gamma))
+    par.q = -1
+    par.m = gamma * me
+    par.vx = beta * cc * cmath.cos(divergence/1000)
+    par.vy = beta * cc * cmath.sin(divergence/1000)
+    par.x = 0
+    par.y = 0
+    par.t = 0
 
 
 cdef class pySpectrometer:
@@ -89,7 +90,7 @@ cdef class pySpectrometer:
         self.init(datas["B"], *datas["paras"])
         datas.close()
 
-    cdef double accessB(self, int x, int y) nogil:
+    cdef inline double accessB(self, int x, int y) nogil:
         if ((x<0) or (x>=self.x_grid) or (y<0) or (y>=self.y_grid)) :
             return 0
         return self.B[y, x];
@@ -149,7 +150,7 @@ cdef class pySpectrometer:
             np.ndarray[double, ndim=2] x_pos, y_pos, times
             np.ndarray[int, ndim=2] results
             int num_threads = openmp.omp_get_num_threads()
-            Particle test, blank
+            Particle test
         en_size = energies.shape[0]
         div_size = divergences.shape[0]
         x_pos = np.ndarray(shape=(en_size, div_size), dtype=float)
@@ -157,16 +158,16 @@ cdef class pySpectrometer:
         times = np.ndarray(shape=(en_size, div_size), dtype=float)
         results = np.ndarray(shape=(en_size, div_size), dtype=np.int32)
 
-        for i in prange(en_size, nogil=True, schedule='dynamic'):
-            En = energies[i]
-            j = 0
-            test = blank
-            for j in range(div_size):
-                div = divergences[j]
-                setElectron(&test, En, div)
-                results[i, j] = self.run(&test)
-                x_pos[i, j] = test.x
-                y_pos[i, j] = test.y
+        with nogil, parallel():
+            test = test
+            for i in prange(en_size, schedule='dynamic'):
+                En = energies[i]
+                for j in range(div_size):
+                    div = divergences[j]
+                    setElectron(&test, En, div)
+                    results[i, j] = self.run(&test)
+                    x_pos[i, j] = test.x
+                    y_pos[i, j] = test.y
 
         return x_pos, y_pos, times, results
 
@@ -194,14 +195,17 @@ cdef class pySpectrometer:
 #         return side, front
 #
 # cdef class pyEDPSolver:
-#     cdef EDPSolver solver
-#     cdef public np.ndarray energies, divergences, times, positions
+#     cdef:
+#         public np.ndarray[double, ndim=1] energies, divergences
+#         public np.ndarray[double, ndim=2] times, positions, valid
+#         int en_size, div_size
+#         double en_delta, div_delta
 #
 #     @classmethod
-#     def fromdata(cls, np.ndarray[double, ndim=1, mode="c"] energies not None, np.ndarray[double, ndim=1, mode="c"] divergences not None,
-#             np.ndarray[double, ndim=1, mode="c"] times not None, np.ndarray[double, ndim=2, mode="c"] positions not None):
+#     def fromdata(cls, np.ndarray[double, ndim=1] energies not None, np.ndarray[double, ndim=1] divergences not None,
+#             np.ndarray[double, ndim=2] times not None, np.ndarray[double, ndim=2] positions not None, np.ndarray[double, ndim=2] valid not None):
 #         newsolver = cls()
-#         newsolver.init(energies, divergences, times, positions)
+#         newsolver.init(energies, divergences, times, positions, valid)
 #         return newsolver
 #
 #     @classmethod
@@ -210,28 +214,28 @@ cdef class pySpectrometer:
 #         newsolver.load(f)
 #         return newsolver
 #
-#     def init(self, np.ndarray[double, ndim=1, mode="c"] energies not None, np.ndarray[double, ndim=1, mode="c"] divergences not None,
-#             np.ndarray[double, ndim=1, mode="c"] times not None, np.ndarray[double, ndim=2, mode="c"] positions not None):
-#         #check if input is valid
-#         if not ((energies.shape[0] == times.shape[0]) and (energies.shape[0] == positions.shape[0]) and (divergences.shape[0] == positions.shape[1])) :
-#             raise ValueError("Unmatched input size")
-#         #TODO: check if sorted
-#
+#     def init(self, np.ndarray[double, ndim=1] energies not None, np.ndarray[double, ndim=1] divergences not None,
+#             np.ndarray[double, ndim=2] times not None, np.ndarray[double, ndim=2] positions not None, np.ndarray[double, ndim=2] valid not None):
 #         self.energies = energies
 #         self.divergences = divergences
 #         self.times = times
 #         self.positions = positions
+#         self.valid = valid
+#         self.en_size = self.energies.shape[0]
+#         self.div_size = self.divergences.shape[0]
+#         if en_size > 1:
+#             self.en_delta = (energies[self.en_size-1] - energies[0])/(self.en_size-1)
+#         if div_size > 1:
+#             self.div_delta = (divergences[self.div_size-1] - divergences[0])/(self.div_size-1)
+#         #check if input is valid
+#         #if not ((energies.shape[0] == times.shape[0]) and (energies.shape[0] == positions.shape[0]) and (divergences.shape[0] == positions.shape[1])) :
+#         #    raise ValueError("Unmatched input size")
+#         #TODO: check if sorted
 #
-#         self.solver.energies = &energies[0]
-#         self.solver.divergences = &divergences[0]
-#         self.solver.times = &times[0]
-#         self.solver.positions = &positions[0, 0]
-#         self.solver.div_size = self.divergences.shape[0]
-#         self.solver.en_size = self.energies.shape[0]
 #         self.solver.central_index = np.argmin(np.abs(divergences))
 #
 #     def save(self, f):
-#         np.savez(f, energies = self.energies, divergences = self.divergences, times = self.times, positions = self.positions)
+#         np.savez(f, energies = self.energies, divergences = self.divergences, times = self.times, positions = self.positions, valid=self.valid)
 #
 #     def load(self, f):
 #         datas = np.load(f)
@@ -239,7 +243,8 @@ cdef class pySpectrometer:
 #         divergences = datas["divergences"]
 #         times = datas["times"]
 #         positions = datas["positions"]
-#         self.init(energies, divergences, times, positions)
+#         valid = datas["valid"]
+#         self.init(energies, divergences, times, positions, valid)
 #         datas.close()
 #
 #     def getP(self, E, D):
