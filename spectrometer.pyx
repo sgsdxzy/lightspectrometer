@@ -37,6 +37,27 @@ cdef Particle setElectron(Particle *par, double energy, double divergence) nogil
     par.y = 0
     par.t = 0
 
+cdef int find_nearest(double[:] data, double needle) nogil:
+    cdef:
+        int size = data.shape[0]
+        int i, arg
+        double diff, newdiff
+    arg = 0
+    diff = cmath.fabs(data[0] - needle)
+    for i in range(1, size):
+        newdiff = cmath.fabs(data[i] - needle)
+        if  newdiff < diff:
+            diff = newdiff
+            arg = i
+    return arg
+
+cdef int find_nearest_sorted(double[:] data, double needle, int start, int stop):
+    #TODO
+    if (data[start]-needle)*(data[stop]-needle) > 0 :
+        #not found
+        pass
+    arg = 0
+    return arg
 
 cdef class pySpectrometer:
     cdef:
@@ -171,87 +192,88 @@ cdef class pySpectrometer:
 
         return x_pos, y_pos, times, results
 
-    def getSolvers(self, double[:] energies, double[:] divergences):
-        return self.getSolverData(energies, divergences)
+    def getSolvers(self, np.ndarray[double, ndim=1] energies, np.ndarray[double, ndim=1] divergences):
+        x_pos, y_pos, times, results = self.getSolverData(energies, divergences)
+        side = None
+        front = None
+        side_en = (results == 1).any(axis=1)
+        front_en = (results == 2).any(axis=1)
+        if side_en.any() :
+            side = pyEDPSolver()
+            valid = results[side_en] == 1
+            side_valid = np.array([ np.nonzero(row)[0][[1,-1]] for row in valid ], dtype=np.int32)
+            side.init(energies[side_en], divergences, times[side_en], x_pos[side_en], side_valid)
+        if front_en.any() :
+            front = pyEDPSolver()
+            valid = results[front_en] == 2
+            front_valid = np.array([ np.nonzero(row)[0][[1,-1]] for row in valid ], dtype=np.int32)
+            front.init(energies[front_en], divergences, times[front_en], y_pos[front_en], front_valid)
+        return side, front
 
-#     def getSolvers(self, np.ndarray[double, ndim=1, mode="c"] energies not None, np.ndarray[double, ndim=1, mode="c"] divergences not None):
-#         cdef np.ndarray[double, ndim=2, mode="c"] x_pos = np.ndarray(shape=(energies.shape[0], divergences.shape[0]), dtype=float, order="c")
-#         cdef np.ndarray[double, ndim=2, mode="c"] y_pos = np.ndarray(shape=(energies.shape[0], divergences.shape[0]), dtype=float, order="c")
-#         cdef np.ndarray[int, ndim=2, mode="c"] results =  np.ndarray(shape=(energies.shape[0], divergences.shape[0]), dtype=np.int32, order="c")
-#         cdef np.ndarray[double, ndim=1, mode="c"] times = np.ndarray(shape=(energies.shape[0], ), dtype=float, order="c")
-#         cdef int central_index = np.argmin(np.abs(divergences))
-#         self.spec.getSolverData(&energies[0], energies.shape[0], &divergences[0], divergences.shape[0], &x_pos[0, 0], &y_pos[0, 0], &results[0, 0], &times[0], central_index)
-#
-#         side = None
-#         front = None
-#         side_en = (results == 1).all(axis=1)
-#         front_en = (results == 2).all(axis=1)
-#         if side_en.any() :
-#             side = pyEDPSolver()
-#             side.init(energies[side_en], divergences, times[side_en], x_pos[side_en])
-#         if front_en.any() :
-#             front = pyEDPSolver()
-#             front.init(energies[front_en], divergences, times[front_en], y_pos[front_en])
-#         return side, front
-#
-# cdef class pyEDPSolver:
-#     cdef:
-#         public np.ndarray[double, ndim=1] energies, divergences
-#         public np.ndarray[double, ndim=2] times, positions, valid
-#         int en_size, div_size
-#         double en_delta, div_delta
-#
-#     @classmethod
-#     def fromdata(cls, np.ndarray[double, ndim=1] energies not None, np.ndarray[double, ndim=1] divergences not None,
-#             np.ndarray[double, ndim=2] times not None, np.ndarray[double, ndim=2] positions not None, np.ndarray[double, ndim=2] valid not None):
-#         newsolver = cls()
-#         newsolver.init(energies, divergences, times, positions, valid)
-#         return newsolver
-#
-#     @classmethod
-#     def fromfile(cls, f):
-#         newsolver = cls()
-#         newsolver.load(f)
-#         return newsolver
-#
-#     def init(self, np.ndarray[double, ndim=1] energies not None, np.ndarray[double, ndim=1] divergences not None,
-#             np.ndarray[double, ndim=2] times not None, np.ndarray[double, ndim=2] positions not None, np.ndarray[double, ndim=2] valid not None):
-#         self.energies = energies
-#         self.divergences = divergences
-#         self.times = times
-#         self.positions = positions
-#         self.valid = valid
-#         self.en_size = self.energies.shape[0]
-#         self.div_size = self.divergences.shape[0]
-#         if en_size > 1:
-#             self.en_delta = (energies[self.en_size-1] - energies[0])/(self.en_size-1)
-#         if div_size > 1:
-#             self.div_delta = (divergences[self.div_size-1] - divergences[0])/(self.div_size-1)
-#         #check if input is valid
-#         #if not ((energies.shape[0] == times.shape[0]) and (energies.shape[0] == positions.shape[0]) and (divergences.shape[0] == positions.shape[1])) :
-#         #    raise ValueError("Unmatched input size")
-#         #TODO: check if sorted
-#
-#         self.solver.central_index = np.argmin(np.abs(divergences))
-#
-#     def save(self, f):
-#         np.savez(f, energies = self.energies, divergences = self.divergences, times = self.times, positions = self.positions, valid=self.valid)
-#
-#     def load(self, f):
-#         datas = np.load(f)
-#         energies = datas["energies"]
-#         divergences = datas["divergences"]
-#         times = datas["times"]
-#         positions = datas["positions"]
-#         valid = datas["valid"]
-#         self.init(energies, divergences, times, positions, valid)
-#         datas.close()
-#
-#     def getP(self, E, D):
-#         return self.solver.getP(E, D)
-#
-#     def getE(self, P, D):
-#         return self.solver.getE(P, D)
-#
-#     def getT(self, E):
-#         return self.solver.getT(E)
+
+cdef class pyEDPSolver:
+    cdef:
+        double[:] energies, divergences
+        double[:, :] times, positions
+        int[:, :] valid
+
+    @classmethod
+    def fromdata(cls, double[:] energies not None,double[:] divergences not None,
+            double[:, :] times not None, double[:, :] positions not None, int[:, :] valid not None):
+        newsolver = cls()
+        newsolver.init(energies, divergences, times, positions, valid)
+        return newsolver
+
+    @classmethod
+    def fromfile(cls, f):
+        newsolver = cls()
+        newsolver.load(f)
+        return newsolver
+
+    def init(self, double[:] energies not None,double[:] divergences not None,
+            double[:, :] times not None, double[:, :] positions not None, int[:, :] valid not None):
+        self.energies = energies
+        self.divergences = divergences
+        self.times = times
+        self.positions = positions
+        self.valid = valid
+        #check if input is valid
+        #if not ((energies.shape[0] == times.shape[0]) and (energies.shape[0] == positions.shape[0]) and (divergences.shape[0] == positions.shape[1])) :
+        #    raise ValueError("Unmatched input size")
+        #TODO: check if sorted
+
+    def save(self, f):
+        np.savez(f, energies = self.energies, divergences = self.divergences, times = self.times, positions = self.positions, valid=self.valid)
+
+    def load(self, f):
+        datas = np.load(f)
+        energies = datas["energies"]
+        divergences = datas["divergences"]
+        times = datas["times"]
+        positions = datas["positions"]
+        valid = datas["valid"]
+        self.init(energies, divergences, times, positions, valid)
+        datas.close()
+
+    cpdef double getP(self, double E, double D):
+        cdef:
+            int en_nearest, div_nearest
+            double result
+        en_nearest = find_nearest(self.energies, E)
+        div_nearest = find_nearest(self.divergences, D)
+        result = self.positions[en_nearest, div_nearest]
+        return result
+
+    cpdef double getE(self, double P, double D):
+        cdef:
+            int pos_nearest, div_nearest
+        div_nearest = find_nearest(self.divergences, D)
+        pos_nearest = find_nearest(self.positions[:, div_nearest], P)
+        return self.energies[pos_nearest]
+
+    cpdef double getT(self, double E, double D):
+        cdef:
+            int en_nearest, div_nearest
+        en_nearest = find_nearest(self.energies, E)
+        div_nearest = find_nearest(self.divergences, D)
+        return self.times[en_nearest, div_nearest]
