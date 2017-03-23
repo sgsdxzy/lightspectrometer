@@ -123,32 +123,42 @@ cdef class pySpectrometer:
         self.init(datas["B"], *datas["paras"])
         datas.close()
 
-    cdef inline double accessB(self, int x, int y) nogil:
-        if ((x<0) or (x>=self.x_grid) or (y<0) or (y>=self.y_grid)) :
-            return 0
-        return self.B[y, x];
+    #cdef inline double accessB(self, int x, int y) nogil:
+        #if ((x<0) or (x>=self.x_grid) or (y<0) or (y>=self.y_grid)) :
+        #    return 0
+        #return self.B[y, x];
 
     cdef double getB(self, double x, double y) nogil:
         '''Get the magnetic field at physical space (x,y)'''
         x -= self.x_offset
         y -= self.y_offset
-        cdef int x_left = <int>cmath.floor(x/self.x_delta);
-        cdef int y_left = <int>cmath.floor(y/self.y_delta);
-        cdef double pr = self.accessB(x_left, y_left)
-        cdef double qr = self.accessB(x_left+1, y_left);
-        cdef double ps = self.accessB(x_left, y_left+1);
-        cdef double qs = self.accessB(x_left+1, y_left+1);
-        cdef double p = x - x_left*self.x_delta;
-        cdef double q = (x_left+1)*self.x_delta - x;
-        cdef double r = y - y_left*self.y_delta;
-        cdef double s = (y_left+1)*self.y_delta - y;
-        return (r*p*qs+r*q*ps+s*p*qr+s*q*pr)/(self.x_delta*self.y_delta);
+        cdef int x_left = <int>cmath.floor(x/self.x_delta)
+        cdef int y_left = <int>cmath.floor(y/self.y_delta)
+        cdef double pr = self.B[y_left, x_left]
+        cdef double qr = self.B[y_left, x_left+1]
+        cdef double ps = self.B[y_left+1, x_left]
+        cdef double qs = self.B[y_left+1, x_left+1]
+        cdef double p = x - x_left*self.x_delta
+        cdef double q = self.x_delta - p
+        cdef double r = y - y_left*self.y_delta
+        cdef double s = self.y_delta - r
+        return (r*p*qs+r*q*ps+s*p*qr+s*q*pr)/(self.x_delta*self.y_delta)
 
     cdef int run(self, Particle *par) nogil:
-        '''Push the particle in magnetic field until condition() is met, return result: 0-3 same as condition(), 4 = timeout'''
+        '''Push the particle in magnetic field until condition() is met, return result: 0-4 same as condition(), 5 = timeout'''
         cdef:
-            double B, t, s, vpx, vpy
+            double B, t, s, vpx, vpy, time
             int result = 0
+
+        #push particle from source to left edge of B region
+        if (par.x < self.x_offset) :
+            time = (self.x_offset - par.x)/par.vx
+            par.x = self.x_offset
+            par.y += par.vy * time
+            par.t += time
+        result = self.condition(par)
+        if (result != 0):
+            return result
 
         while (par.t <= self.maxtime):
             B = self.getB(par.x, par.y)
@@ -162,18 +172,24 @@ cdef class pySpectrometer:
             par.y += par.vy*self.dt
             par.t += self.dt
             result = self.condition(par)
+            if (result == 4):
+                time = (622e-3 - par.x)/par.vx
+                par.x = 622e-3
+                par.y += par.vy * time
+                par.t += time
+                return 2
             if (result != 0):
                 return result
-        return 4
+        return 5
 
     cdef int condition(self, Particle* par) nogil:
-        '''Whether a partile hits detector or is lost and stops running, return status: 0 = keep running, 1 = hit side, 2 = hit front, 3 = hit other'''
-        if ((par.x < -10e-3) or (par.y < -110e-3)):
-            return 3
+        '''Whether a partile hits detector or is lost and stops running, return status: 0 = keep running, 1 = hit side, 2 = hit front, 3 = hit other, 4 = exit B region'''
         if ((par.x >= 152e-3) and (par.x <= 522e-3) and (par.y >= 100e-3)):
             return 1
-        if ((par.x >= 622e-3)):
-            return 2
+        if ((par.x < self.x_offset) or (par.y <= self.y_offset) or (par.y >= 100e-3)):
+            return 3
+        if ((par.x >= 532e-3)):
+            return 4
         return 0;
 
     cdef getSolverData(self, double[:] energies, double[:] divergences):
@@ -214,13 +230,15 @@ cdef class pySpectrometer:
         if side_en.any() :
             side = pyEDPSolver()
             valid = results[side_en] == 1
-            side_valid = np.array([ np.nonzero(row)[0][[1,-1]] for row in valid ], dtype=np.int32)
-            side.init(energies[side_en], divergences, times[side_en], x_pos[side_en], side_valid)
+            en_valid = np.array([ np.nonzero(row)[0][[0,-1]] for row in valid.T ], dtype=np.int32)
+            div_valid = np.array([ np.nonzero(row)[0][[0,-1]] for row in valid ], dtype=np.int32)
+            side.init(energies[side_en], divergences, times[side_en], x_pos[side_en], en_valid, div_valid)
         if front_en.any() :
             front = pyEDPSolver()
             valid = results[front_en] == 2
-            front_valid = np.array([ np.nonzero(row)[0][[1,-1]] for row in valid ], dtype=np.int32)
-            front.init(energies[front_en], divergences, times[front_en], y_pos[front_en], front_valid)
+            en_valid = np.array([ np.nonzero(row)[0][[0,-1]] for row in valid.T ], dtype=np.int32)
+            div_valid = np.array([ np.nonzero(row)[0][[0,-1]] for row in valid ], dtype=np.int32)
+            front.init(energies[front_en], divergences, times[front_en], y_pos[front_en], en_valid, div_valid)
         return side, front
 
 
