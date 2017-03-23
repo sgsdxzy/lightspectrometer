@@ -37,27 +37,39 @@ cdef Particle setElectron(Particle *par, double energy, double divergence) nogil
     par.y = 0
     par.t = 0
 
-cdef int find_nearest(double[:] data, double needle) nogil:
+cdef int find_nearest(double[:] data, double needle, int start, int stop) nogil:
     cdef:
-        int size = data.shape[0]
         int i, arg
         double diff, newdiff
-    arg = 0
-    diff = cmath.fabs(data[0] - needle)
-    for i in range(1, size):
+    arg = start
+    diff = cmath.fabs(data[start] - needle)
+    for i in range(start, stop+1):
         newdiff = cmath.fabs(data[i] - needle)
         if  newdiff < diff:
             diff = newdiff
             arg = i
     return arg
 
-cdef int find_nearest_sorted(double[:] data, double needle, int start, int stop):
-    #TODO
+cdef int find_nearest_sorted(double[:] data, double needle, int start, int stop) nogil:
+    if start == stop :
+        #one element list
+        return start
     if (data[start]-needle)*(data[stop]-needle) > 0 :
-        #not found
-        pass
-    arg = 0
-    return arg
+        #not in range
+        return -1
+    return find_nearest_iter(data, needle, start, stop)
+
+cdef int find_nearest_iter(double[:] data, double needle, int start, int stop) nogil:
+    if stop - start == 1:
+        if cmath.fabs(data[start]-needle) <= cmath.fabs(data[stop]-needle) :
+            return start
+        else :
+            return stop
+    cdef int middle = (start+stop)/2
+    if (data[start]-needle)*(data[middle]-needle) <= 0 :
+        return find_nearest_iter(data, needle, start, middle)
+    else :
+        return find_nearest_iter(data, needle, middle, stop)
 
 cdef class pySpectrometer:
     cdef:
@@ -193,6 +205,7 @@ cdef class pySpectrometer:
         return x_pos, y_pos, times, results
 
     def getSolvers(self, np.ndarray[double, ndim=1] energies, np.ndarray[double, ndim=1] divergences):
+        '''Get side and front solvers. energeis and divergences must be in increasing order and evenly spaced.'''
         x_pos, y_pos, times, results = self.getSolverData(energies, divergences)
         side = None
         front = None
@@ -215,13 +228,13 @@ cdef class pyEDPSolver:
     cdef:
         double[:] energies, divergences
         double[:, :] times, positions
-        int[:, :] valid
+        int[:, :] en_valid, div_valid
 
     @classmethod
-    def fromdata(cls, double[:] energies not None,double[:] divergences not None,
-            double[:, :] times not None, double[:, :] positions not None, int[:, :] valid not None):
+    def fromdata(cls, double[:] energies not None,double[:] divergences not None, double[:, :] times not None,
+            double[:, :] positions not None, int[:, :] en_valid not None, int[:, :] div_valid not None):
         newsolver = cls()
-        newsolver.init(energies, divergences, times, positions, valid)
+        newsolver.init(energies, divergences, times, positions, en_valid, div_valid)
         return newsolver
 
     @classmethod
@@ -230,50 +243,44 @@ cdef class pyEDPSolver:
         newsolver.load(f)
         return newsolver
 
-    def init(self, double[:] energies not None,double[:] divergences not None,
-            double[:, :] times not None, double[:, :] positions not None, int[:, :] valid not None):
+    def init(self, double[:] energies not None,double[:] divergences not None, double[:, :] times not None,
+            double[:, :] positions not None, int[:, :] en_valid not None, int[:, :] div_valid not None):
         self.energies = energies
         self.divergences = divergences
         self.times = times
         self.positions = positions
-        self.valid = valid
-        #check if input is valid
-        #if not ((energies.shape[0] == times.shape[0]) and (energies.shape[0] == positions.shape[0]) and (divergences.shape[0] == positions.shape[1])) :
-        #    raise ValueError("Unmatched input size")
-        #TODO: check if sorted
+        self.en_valid = en_valid
+        self.div_valid = div_valid
+
 
     def save(self, f):
-        np.savez(f, energies = self.energies, divergences = self.divergences, times = self.times, positions = self.positions, valid=self.valid)
+        np.savez(f, energies = self.energies, divergences = self.divergences, times = self.times, positions = self.positions, en_valid=self.en_valid, div_valid=self.div_valid)
 
     def load(self, f):
         datas = np.load(f)
-        energies = datas["energies"]
-        divergences = datas["divergences"]
-        times = datas["times"]
-        positions = datas["positions"]
-        valid = datas["valid"]
-        self.init(energies, divergences, times, positions, valid)
+        self.init(**datas)
         datas.close()
 
     cpdef double getP(self, double E, double D):
         cdef:
             int en_nearest, div_nearest
             double result
-        en_nearest = find_nearest(self.energies, E)
-        div_nearest = find_nearest(self.divergences, D)
+        en_nearest = find_nearest_sorted(self.energies, E, 0, self.energies.shape[0]-1)
+        div_nearest = find_nearest_sorted(self.divergences, D, self.div_valid[en_nearest, 0], self.div_valid[en_nearest, 1])
         result = self.positions[en_nearest, div_nearest]
         return result
 
     cpdef double getE(self, double P, double D):
         cdef:
             int pos_nearest, div_nearest
-        div_nearest = find_nearest(self.divergences, D)
-        pos_nearest = find_nearest(self.positions[:, div_nearest], P)
+        div_nearest = find_nearest(self.divergences, D, 0, self.divergences.shape[0]-1)
+        pos_nearest = find_nearest(self.positions[:, div_nearest], P, self.en_valid[div_nearest, 0], self.en_valid[div_nearest, 1])
         return self.energies[pos_nearest]
 
     cpdef double getT(self, double E, double D):
         cdef:
             int en_nearest, div_nearest
-        en_nearest = find_nearest(self.energies, E)
-        div_nearest = find_nearest(self.divergences, D)
-        return self.times[en_nearest, div_nearest]
+        en_nearest = find_nearest_sorted(self.energies, E, 0, self.energies.shape[0]-1)
+        div_nearest = find_nearest_sorted(self.divergences, D, self.div_valid[en_nearest, 0], self.div_valid[en_nearest, 1])
+        result = self.times[en_nearest, div_nearest]
+        return result
