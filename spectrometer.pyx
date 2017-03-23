@@ -6,11 +6,12 @@
 # cython: initializedcheck = False
 
 import cython
+from cython cimport view
 from cython.parallel import parallel, prange
 from libc.stdlib cimport malloc, free
 cimport openmp
 import numpy as np
-cimport numpy as np
+cimport numpy as cnp
 cimport libc.math as cmath
 from libc.stdio cimport printf
 
@@ -37,6 +38,18 @@ cdef Particle setElectron(Particle *par, double energy, double divergence) nogil
     par.y = 0
     par.t = 0
 
+cdef inline int min(int a, int b) nogil:
+    if (a>b) :
+        return b
+    else :
+        return a
+
+cdef inline int max(int a, int b) nogil:
+    if (a>b) :
+        return a
+    else :
+        return b
+
 cdef int find_nearest(double[:] data, double needle, int start, int stop) nogil:
     cdef:
         int i, arg
@@ -50,10 +63,10 @@ cdef int find_nearest(double[:] data, double needle, int start, int stop) nogil:
             arg = i
     return arg
 
+cdef inline int find_nearest_evenly_spaced(double first, double delta, double needle) nogil:
+    return <int>cmath.round((needle-first)/delta)
+
 cdef int find_nearest_sorted(double[:] data, double needle, int start, int stop) nogil:
-    if start == stop :
-        #one element list
-        return start
     if (data[start]-needle)*(data[stop]-needle) > 0 :
         #not in range
         return -1
@@ -70,6 +83,24 @@ cdef int find_nearest_iter(double[:] data, double needle, int start, int stop) n
         return find_nearest_iter(data, needle, start, middle)
     else :
         return find_nearest_iter(data, needle, middle, stop)
+
+cdef inline int find_left_evenly_spaced(double first, double delta, double needle) nogil:
+    return <int>cmath.floor((needle-first)/delta)
+
+cdef inline int find_left_sorted(double[:] data, double needle, int start, int stop) nogil:
+    if (start == stop) or (data[start]-needle)*(data[stop]-needle) > 0 :
+        #not in range
+        return -1
+    return find_left_iter(data, needle, start, stop)
+
+cdef int find_left_iter(double[:] data, double needle, int start, int stop) nogil:
+    if stop - start == 1:
+        return start
+    cdef int middle = (start+stop)/2
+    if (data[start]-needle)*(data[middle]-needle) <= 0 :
+        return find_left_iter(data, needle, start, middle)
+    else :
+        return find_left_iter(data, needle, middle, stop)
 
 cdef class pySpectrometer:
     cdef:
@@ -196,8 +227,8 @@ cdef class pySpectrometer:
         cdef:
             double En, div;
             int i, j, en_size, div_size;
-            np.ndarray[double, ndim=2] x_pos, y_pos, times
-            np.ndarray[int, ndim=2] results
+            cnp.ndarray[double, ndim=2] x_pos, y_pos, times
+            cnp.ndarray[int, ndim=2] results
             int num_threads = openmp.omp_get_num_threads()
             Particle test
         en_size = energies.shape[0]
@@ -220,7 +251,7 @@ cdef class pySpectrometer:
 
         return x_pos, y_pos, times, results
 
-    def getSolvers(self, np.ndarray[double, ndim=1] energies, np.ndarray[double, ndim=1] divergences):
+    def getSolvers(self, cnp.ndarray[double, ndim=1] energies, cnp.ndarray[double, ndim=1] divergences):
         '''Get side and front solvers. energeis and divergences must be in increasing order and evenly spaced.'''
         x_pos, y_pos, times, results = self.getSolverData(energies, divergences)
         side = None
@@ -247,6 +278,9 @@ cdef class pyEDPSolver:
         double[:] energies, divergences
         double[:, :] times, positions
         int[:, :] en_valid, div_valid
+        int en_size, div_size
+        double en_delta, div_delta
+        double en_min, en_max, div_min, div_max
 
     @classmethod
     def fromdata(cls, double[:] energies not None,double[:] divergences not None, double[:, :] times not None,
@@ -269,7 +303,16 @@ cdef class pyEDPSolver:
         self.positions = positions
         self.en_valid = en_valid
         self.div_valid = div_valid
-
+        self.en_size = self.energies.shape[0]
+        self.div_size = self.divergences.shape[0]
+        self.en_min = self.energies[0]
+        self.en_max = self.energies[self.en_size-1]
+        self.div_min = self.divergences[0]
+        self.div_max = self.divergences[self.div_size-1]
+        if self.en_size > 1:
+            self.en_delta = (self.en_max - self.en_min)/(self.en_size-1)
+        if self.div_size > 1:
+            self.div_delta = (self.div_max - self.div_min)/(self.div_size-1)
 
     def save(self, f):
         np.savez(f, energies = self.energies, divergences = self.divergences, times = self.times, positions = self.positions, en_valid=self.en_valid, div_valid=self.div_valid)
@@ -279,26 +322,108 @@ cdef class pyEDPSolver:
         self.init(**datas)
         datas.close()
 
-    cpdef double getP(self, double E, double D):
+    #TODO: special case for 1-element data
+    #In the series of get functions, a return value of 0 means invalid!
+    cpdef double getP_fast(self, double E, double D) :
         cdef:
             int en_nearest, div_nearest
-            double result
-        en_nearest = find_nearest_sorted(self.energies, E, 0, self.energies.shape[0]-1)
-        div_nearest = find_nearest_sorted(self.divergences, D, self.div_valid[en_nearest, 0], self.div_valid[en_nearest, 1])
-        result = self.positions[en_nearest, div_nearest]
-        return result
+        if (E<self.en_min) or (E>self.en_max) or (D<self.div_min) or (D>self.div_max):
+            return 0
+        en_nearest = find_nearest_evenly_spaced(self.en_min, self.en_delta, E)
+        div_nearest = find_nearest_evenly_spaced(self.div_min, self.div_delta, D)
+        if (div_nearest < self.div_valid[en_nearest, 0]) or (div_nearest > self.div_valid[en_nearest, 1]):
+            return 0
+        return self.positions[en_nearest, div_nearest]
 
-    cpdef double getE(self, double P, double D):
+    cpdef double getE_fast(self, double P, double D) :
         cdef:
             int pos_nearest, div_nearest
-        div_nearest = find_nearest(self.divergences, D, 0, self.divergences.shape[0]-1)
-        pos_nearest = find_nearest(self.positions[:, div_nearest], P, self.en_valid[div_nearest, 0], self.en_valid[div_nearest, 1])
-        return self.energies[pos_nearest]
+        if (D<self.div_min) or (D>self.div_max):
+            return 0
+        div_nearest = find_nearest_evenly_spaced(self.div_min, self.div_delta, D)
+        pos_nearest = find_nearest_sorted(self.positions[:, div_nearest], P, self.en_valid[div_nearest, 0], self.en_valid[div_nearest, 1])
+        if pos_nearest == -1 :
+            return 0
+        else :
+            return self.energies[pos_nearest]
 
-    cpdef double getT(self, double E, double D):
+    cpdef double getT_fast(self, double E, double D) :
         cdef:
             int en_nearest, div_nearest
-        en_nearest = find_nearest_sorted(self.energies, E, 0, self.energies.shape[0]-1)
-        div_nearest = find_nearest_sorted(self.divergences, D, self.div_valid[en_nearest, 0], self.div_valid[en_nearest, 1])
-        result = self.times[en_nearest, div_nearest]
-        return result
+        if (E<self.en_min) or (E>self.en_max) or (D<self.div_min) or (D>self.div_max):
+            return 0
+        en_nearest = find_nearest_evenly_spaced(self.en_min, self.en_delta, E)
+        div_nearest = find_nearest_evenly_spaced(self.div_min, self.div_delta, D)
+        if (div_nearest < self.div_valid[en_nearest, 0]) or (div_nearest > self.div_valid[en_nearest, 1]):
+            return 0
+        return self.times[en_nearest, div_nearest]
+
+    cpdef double getP(self, double E, double D) :
+        cdef:
+            int en_left, div_left
+            double pr, qr, ps, qs, p, q, r, s
+        en_left = find_left_evenly_spaced(self.en_min, self.en_delta, E)
+        div_left = find_left_evenly_spaced(self.div_min, self.div_delta, D)
+
+        if ((en_left >=0) and (en_left+1<self.en_size) and (div_left >= self.div_valid[en_left, 0]) and (div_left+1 <= self.div_valid[en_left, 1])\
+                and (div_left >= self.div_valid[en_left+1, 0]) and (div_left+1 <= self.div_valid[en_left+1, 1])):
+            pr = self.positions[en_left, div_left]
+            qr = self.positions[en_left, div_left+1]
+            ps = self.positions[en_left+1, div_left]
+            qs = self.positions[en_left+1, div_left+1]
+            p = D - self.divergences[div_left]
+            q = self.div_delta - p
+            r = E - self.energies[en_left]
+            s = self.en_delta - r
+            return (r*p*qs+r*q*ps+s*p*qr+s*q*pr)/(self.en_delta*self.div_delta)
+        else :
+            return 0
+
+    cpdef double getE(self, double P, double D) :
+        cdef:
+            int pos_left, div_left
+            double p, q
+            int i, start, end, newsize
+            double[:] pos_int
+        if (D<self.div_min) or (D>=self.div_max) :
+            return 0
+        div_left = find_left_evenly_spaced(self.div_min, self.div_delta, D)
+        start = max(self.en_valid[div_left, 0], self.en_valid[div_left+1, 0])
+        end = min(self.en_valid[div_left, 1], self.en_valid[div_left+1, 1])
+        newsize = end - start + 1
+        if (newsize <= 1):
+            return 0
+
+        pos_int = np.ndarray(shape=(newsize, ), dtype=float)
+        p = D - self.divergences[div_left]
+        q = self.div_delta - p
+        for i in range(newsize) :
+            pos_int[i] = (self.positions[i+start, div_left]*q+self.positions[i+start, div_left+1]*p)/self.div_delta
+        pos_left = find_left_sorted(pos_int, P, 0, newsize-1)
+        if pos_left == -1 :
+            return 0
+        pos_left += start
+        p = P - pos_int[pos_left]
+        q = pos_int[pos_left+1] - P
+        return (self.energies[pos_left]*q+self.energies[pos_left+1]*p)/(p+q)
+
+    cpdef double getT(self, double E, double D) :
+        cdef:
+            int en_left, div_left
+            double pr, qr, ps, qs, p, q, r, s
+        en_left = find_left_evenly_spaced(self.en_min, self.en_delta, E)
+        div_left = find_left_evenly_spaced(self.div_min, self.div_delta, D)
+
+        if (en_left >=0) and (en_left+1<self.en_size) and (div_left >= self.div_valid[en_left, 0]) and (div_left+1 <= self.div_valid[en_left, 1])\
+                and (div_left >= self.div_valid[en_left+1, 0]) and (div_left+1 <= self.div_valid[en_left+1, 1]):
+            pr = self.times[en_left, div_left]
+            qr = self.times[en_left, div_left+1]
+            ps = self.times[en_left+1, div_left]
+            qs = self.times[en_left+1, div_left+1]
+            p = D - self.divergences[div_left]
+            q = self.div_delta - p
+            r = E - self.energies[en_left]
+            s = self.en_delta - r
+            return (r*p*qs+r*q*ps+s*p*qr+s*q*pr)/(self.en_delta*self.div_delta)
+        else :
+            return 0
