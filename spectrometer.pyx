@@ -402,9 +402,9 @@ cdef class pyEDPSolver:
         pos_left = find_left_sorted(pos_int, P, 0, newsize-1)
         if pos_left == -1 :
             return 0
-        pos_left += start
         p = P - pos_int[pos_left]
         q = pos_int[pos_left+1] - P
+        pos_left += start
         return (self.energies[pos_left]*q+self.energies[pos_left+1]*p)/(p+q)
 
     cpdef double getT(self, double E, double D) :
